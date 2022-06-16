@@ -1,0 +1,166 @@
+package com.Share_a_person;;
+
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingHealEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+
+@Mod(Utils.MOD_ID)
+@Mod.EventBusSubscriber()
+public class LifeShareing {
+    public static LivingEntity[] playerLivingEntityList = new LivingEntity[20];  //声明并初始化玩家 LivingEntity 数组
+    public static int quorum = 0;  //声明并初始化玩家数量
+    public static int respawnQuorum = 0;  //声明并初始化重生玩家
+    public static int write;  //声明是否写入新玩家 0为不写 1为写入
+    public static PlayerEntity[] playerEntityList = new PlayerEntity[20];  //声明并初始化玩家 Entity 数组
+    public static float [] playerSaturationLevelList = new float[20];  //声明并初始化玩家 饱食度 数组
+    public static int [] playerFoodLevelList = new int[20];  //声明并初始化玩家 饥饿度 数组
+
+    @SubscribeEvent
+    public static void loggedIn (PlayerEvent.PlayerLoggedInEvent event){  //监听玩家登录事件
+        int write = 1;  //玩家登录默认写入
+        for (int i = 0; i < quorum; i++) {  //循环玩家数量次数
+            if (playerLivingEntityList[i] == event.getEntityLiving()){  //判断玩家列表中是否存在新进入的玩家
+                write = 0;  //如果存在，则不写入新玩家
+            }
+        }
+        if (write == 1) {  //判断是否需要写入新玩家
+            playerLivingEntityList[quorum] = event.getEntityLiving();  //将新玩家写入到玩家列表中
+            playerEntityList[quorum] = event.getPlayer();  //将新玩家写入到玩家列表中
+            float saturation = playerEntityList[0].getFoodData().getSaturationLevel();  //声明一个饱食度变量，并赋值第一个玩家的饱食度
+            int food = playerEntityList[0].getFoodData().getFoodLevel();  //声明一个饥饿度变量，并赋值第一个玩家的饥饿度
+            playerSaturationLevelList[quorum] = event.getPlayer().getFoodData().getSaturationLevel();  //将新玩家的 饱食度 写入到饱食度列表
+            playerFoodLevelList[quorum] = event.getPlayer().getFoodData().getFoodLevel();  //将新玩家的 饥饿度 写入到饥饿度列表
+            for (int i = 0; i < quorum + 1; i++) {  //循环玩家次数
+                if (saturation > playerSaturationLevelList[i]){  //判断玩家中饱食度最小的数值是多少
+                    saturation = playerSaturationLevelList[i];  //将最小的饱食度赋值给变量
+                }
+                if (food > playerFoodLevelList[i]){  //判断玩家中饥饿度最小的数值是多少
+                    food = playerFoodLevelList[i];  //将最小的饥饿度赋值给变量
+                }
+            }
+            for (int i = 0; i < quorum + 1; i++) {  //循环玩家次数
+                playerEntityList[i].getFoodData().setSaturation(saturation);  //将所有玩家的饱食度设置为玩家中饱食度最少的
+                playerEntityList[i].getFoodData().setFoodLevel(food);  //将所有玩家的饥饿度设置为玩家中饥饿度最少的
+                playerSaturationLevelList[i] = playerEntityList[i].getFoodData().getSaturationLevel();  //重新将玩家的饱食度赋值到饱食度列表
+                playerFoodLevelList[i] = playerEntityList[i].getFoodData().getFoodLevel();  //重新将玩家的饥饿度赋值到饥饿度列表
+            }
+            quorum++;  //玩家数量+1
+            respawnQuorum++;  //玩家重生数+1
+        }
+    }
+    @SubscribeEvent
+    public static void loggedOut(PlayerEvent.PlayerLoggedOutEvent event){  //监听玩家退出事件
+        for (int i = 0; i < quorum; i++) {  //循环玩家数量次数
+            if (playerLivingEntityList[i] == event.getEntityLiving()){  //判断玩家列表中的哪个玩家退出
+                playerLivingEntityList[i] = null;  //将该玩家移除玩家 LivingEntity 列表
+                playerEntityList[i] = null;  //将玩家移除玩家 Entity 列表
+            }
+            if (playerLivingEntityList[i] == null){  //判断玩家列表当前位置是否被清除
+                playerLivingEntityList[i] = playerLivingEntityList[i+1];  //将后方玩家赋值到前面
+                playerLivingEntityList[i+1] = null;  //将后方的玩家清除
+                playerEntityList[i] = playerEntityList[i+1];  //将后方玩家赋值到前面
+                playerEntityList[i+1] = null;  //将后方的玩家清除
+            }
+        }
+        quorum--;  //玩家数量-1
+        respawnQuorum--;  //重生玩家数量-1
+    }
+    @SubscribeEvent
+    public static void setHealth(LivingHurtEvent event){  //监听玩家受伤事件
+        for (int i = 0; i < quorum; i++) {  //循环玩家次数
+            if (playerLivingEntityList[i] == event.getEntityLiving()) {  //判断受到伤害的是否是列表当前的玩家
+                if (event.getEntityLiving().getHealth() - event.getAmount() <= 0) {  //判断受到的伤害是否会导致死亡
+                    for (int j = 0; j < respawnQuorum; j++) {  //循环玩家次数
+                        if (i != j) {  //判断是否不是受伤的玩家
+                            playerLivingEntityList[j].setHealth(0);  //将其他所有玩家血量设置为0
+                            playerLivingEntityList[j].kill();  //杀死其他所有玩家
+                        }
+                    }
+                } else {
+                    for (int j = 0; j < respawnQuorum; j++) {  //循环玩家次数
+                        if (i != j){  //判断是否不是受伤的玩家
+                            playerLivingEntityList[j].setHealth(event.getEntityLiving().getHealth() - event.getAmount());  //将受伤玩家剩余的血量赋值给其他玩家
+                        }
+                    }
+                }
+            }
+        }
+    }
+    @SubscribeEvent
+    public static void setHealth(LivingHealEvent event){  //监听玩家恢复事件
+        for (int i = 0; i < quorum; i++) {  //循环玩家数量次数
+            if (event.getEntityLiving() == playerLivingEntityList[i]){  //判断当前恢复的实体是哪个玩家
+                for (int j = 0; j < respawnQuorum; j++) {   //循环玩家数量次数
+                    if (j != i){  //判断是否不是受到恢复的玩家
+                        playerLivingEntityList[j].setHealth(event.getEntityLiving().getHealth() + event.getAmount());  //将当前恢复的玩家血量计算后赋值到其他玩家上
+                    }
+                }
+            }
+        }
+    }
+    @SubscribeEvent
+    public static void respawn(PlayerEvent.PlayerRespawnEvent event){  //监听玩家重生事件
+        playerLivingEntityList[respawnQuorum] = event.getEntityLiving();  //重生的玩家重新赋值到玩家列表数组中
+        playerEntityList[respawnQuorum] = event.getPlayer();  //重生的玩家重新赋值到玩家列表中
+        respawnQuorum++;  //重生人数++
+    }
+    @SubscribeEvent
+    public static void death(LivingDeathEvent event){  //监听死亡事件
+        for (int i = 0; i < quorum; i++) {  //循环玩家次数
+            if (event.getEntityLiving() == playerLivingEntityList[i]){  //判断死亡的实体是否是玩家
+                respawnQuorum = 0;  //重置玩家重生次数
+            }
+        }
+    }
+    @SubscribeEvent
+    public static void ClientTick(TickEvent.ClientTickEvent event){  //监听每tick
+        if (playerLivingEntityList[0] != null){  //判断是否进入了世界
+            //判断当前饥饿度如果小于之前的值，说明消耗了饥饿
+            //判断当前饥饿度如果大于之前的值，说明恢复了饥饿
+            for (int i = 0; i < quorum; i++) {  //循环玩家次数
+                if(playerSaturationLevelList[i] > playerEntityList[i].getFoodData().getSaturationLevel()){  //判断之前的饱食度是否比现在的饱食度高
+                    for (int j = 0; j < quorum; j++) {  //循环玩家次数
+                        if (i != j){  //判断是否不是消耗饱食度的玩家
+                            playerEntityList[j].getFoodData().setSaturation(playerSaturationLevelList[j] - (playerSaturationLevelList[i] - playerEntityList[i].getFoodData().getSaturationLevel()));  //将其他玩家的饱食度减去消耗的饱食度
+                            playerSaturationLevelList[j] = playerEntityList[j].getFoodData().getSaturationLevel();  //重新记录其他玩家的饱食度
+                        }
+                    }
+                    playerSaturationLevelList[i] = playerEntityList[i].getFoodData().getSaturationLevel();  //将当前玩家的饱食度重新赋值
+                }else if(playerEntityList[i].getFoodData().getSaturationLevel() > playerSaturationLevelList[i]){  //判断现在的饱食度是否比之气那的饱食度高
+                    for (int j = 0; j < quorum; j++) {  //循环玩家次数
+                        if (i != j){  //判断是否不是消耗饱食度的玩家
+                            playerEntityList[j].getFoodData().setSaturation(playerSaturationLevelList[j] + (playerEntityList[i].getFoodData().getSaturationLevel() - playerSaturationLevelList[i]));  //将其他玩家的饱食度加上增加的饱食度
+                            playerSaturationLevelList[j] = playerEntityList[j].getFoodData().getSaturationLevel();  //重新记录其他玩家的饱食度
+                        }
+                    }
+                    playerSaturationLevelList[i] = playerEntityList[i].getFoodData().getSaturationLevel();  //将当前玩家的饱食度重新赋值
+                }
+                if (playerFoodLevelList[i] > playerEntityList[i].getFoodData().getFoodLevel()) {  //判断之前饥饿度是否比现在的饱食度高
+                    for (int j = 0; j < quorum; j++) {  //循环玩家次数
+                        if(i != j){  //判断是否不是消耗饥饿度的玩家
+                            playerEntityList[j].getFoodData().setFoodLevel(playerFoodLevelList[j] - (playerFoodLevelList[i] - playerEntityList[i].getFoodData().getFoodLevel()));  //将其他玩家的饥饿度减去消耗的饥饿度
+                            playerFoodLevelList[j] = playerEntityList[j].getFoodData().getFoodLevel();  //重新记录其他玩家的饥饿度
+                        }
+                    }
+                    playerFoodLevelList[i] = playerEntityList[i].getFoodData().getFoodLevel();  //将当前玩家的饥饿度重新赋值
+                }else if(playerEntityList[i].getFoodData().getFoodLevel() > playerFoodLevelList[i]){  //判断当前的饥饿度是否比之前的饥饿度高
+                    for (int j = 0; j < quorum; j++) {  //循环玩家次数
+                        if(i != j){  //判断是否不是恢复饥饿度的玩家
+                            playerEntityList[j].getFoodData().setFoodLevel(playerFoodLevelList[j] + (playerEntityList[i].getFoodData().getFoodLevel() - playerFoodLevelList[i]));  //将其他玩家的饥饿度加上增加的饥饿度
+                            playerFoodLevelList[j] = playerEntityList[j].getFoodData().getFoodLevel();  //重新记录其他玩家的饥饿度
+                        }
+                    }
+                    playerFoodLevelList[i] = playerEntityList[i].getFoodData().getFoodLevel();  //将当前玩家的饥饿度重新赋值
+                }
+            }
+        }
+    }
+}
+
+
